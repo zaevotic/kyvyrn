@@ -9,6 +9,7 @@ pub fn command_exists(cmd: &str) -> bool {
 
 pub fn detect_chromium_browser() -> Result<String, String> {
     let candidates = [
+        "brave",
         "brave-browser",
         "brave-browser-stable",
         "brave-browser-nightly",
@@ -33,6 +34,7 @@ pub fn detect_chromium_browser() -> Result<String, String> {
 #[tauri::command]
 pub fn detect_chromium_browsers() -> Vec<String> {
     let candidates = [
+        "brave",
         "brave-browser",
         "brave-browser-stable",
         "brave-browser-nightly",

@@ -1,10 +1,24 @@
 use std::path::PathBuf;
 
-// TODO(desktop):
-// When .desktop support is added:
-// - update Name= on rename
-// - remove .desktop file on delete
-// - regenerate Exec path if folder moves
+pub fn applications_dir() -> PathBuf {
+    dirs::data_dir().expect("No data dir").join("applications")
+}
+
+pub fn desktop_entry_path(id: &str) -> PathBuf {
+    applications_dir().join(format!("kyvyrn-{}.desktop", id))
+}
+
+pub fn icon_path(id: &str) -> PathBuf {
+    dirs::data_dir().expect("No data dir").join("kyvyrn").join("icons").join(format!("{}.png", id))
+}
+
+pub fn app_profile_dir(folder: &str) -> PathBuf {
+    app_dir(folder).join("profile")
+}
+
+pub fn app_webkit_data_dir(folder: &str) -> PathBuf {
+    app_dir(folder).join("webkit_data")
+}
 
 pub fn global_config_path() -> std::path::PathBuf {
     let base = dirs::config_dir().expect("No config dir").join("kyvyrn");

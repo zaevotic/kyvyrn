@@ -29,6 +29,8 @@ pub struct AppConfig {
     pub created_at: u64,
     pub engine: Engine,
     pub folder: String,
+    #[serde(default)]
+    pub titlebar: Option<bool>,
 }
 
 #[tauri::command]
@@ -45,8 +47,11 @@ pub fn load_apps(state: tauri::State<AppRegistry>) -> Result<Vec<AppConfig>, Str
 
         if path.exists() {
             let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            let app: AppConfig = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-            registry.insert(app.id.clone(), app.clone());
+            if let Ok(app) = serde_json::from_str::<AppConfig>(&data) {
+                // Ensure desktop entry exists and is synced
+                let _ = crate::utils::desktop::write_desktop_entry(&app);
+                registry.insert(app.id.clone(), app);
+            }
         }
     }
 
@@ -63,6 +68,8 @@ pub fn update_app(app: AppConfig, state: tauri::State<AppRegistry>) -> Result<()
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, json).map_err(|e| e.to_string())?;
     fs::rename(tmp, path).map_err(|e| e.to_string())?;
+
+    let _ = crate::utils::desktop::write_desktop_entry(&app);
 
     state.apps.lock().unwrap().insert(app.id.clone(), app);
     Ok(())
@@ -86,7 +93,7 @@ pub fn update_app_config(
         rename_app_folder(&id, &config.name, &name)?;
         config.name = name;
 
-        // 🔥 IMPORTANT: recompute paths after rename
+        // Recompute paths after rename
         app_dir = app_dir_by_id(&id)?;
         config_path = app_dir.join("config.json");
     }
@@ -95,6 +102,9 @@ pub fn update_app_config(
     config.engine = engine;
 
     save_config(&config_path, &config)?;
+
+    let _ = crate::utils::desktop::write_desktop_entry(&config);
+
     Ok(())
 }
 
@@ -102,6 +112,13 @@ pub fn update_app_config(
 pub fn delete_app(id: String) -> Result<(), String> {
     let app_dir = app_dir_by_id(&id)?;
     std::fs::remove_dir_all(&app_dir).map_err(|e| e.to_string())?;
+
+    // Remove desktop entry and icon
+    let _ = crate::utils::desktop::remove_desktop_entry(&id);
+    let icon_file = crate::utils::paths::icon_path(&id);
+    if icon_file.exists() {
+        let _ = std::fs::remove_file(icon_file);
+    }
 
     Ok(())
 }
@@ -114,20 +131,33 @@ pub fn save_app(mut app: AppConfig, state: tauri::State<AppRegistry>) -> Result<
     let dir = app_dir(&app.folder);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
+    // Prepare profile directory based on engine
+    match &app.engine {
+        Engine::Chromium { .. } => {
+            fs::create_dir_all(crate::utils::paths::app_profile_dir(&app.folder)).ok();
+        }
+        Engine::WebKit => {
+            fs::create_dir_all(crate::utils::paths::app_webkit_data_dir(&app.folder)).ok();
+        }
+    }
+
     let json = serde_json::to_string_pretty(&app).map_err(|e| e.to_string())?;
     fs::write(dir.join("config.json"), json).map_err(|e| e.to_string())?;
+
+    // Create .desktop entry for system app launchers
+    let _ = crate::utils::desktop::write_desktop_entry(&app);
 
     state.apps.lock().unwrap().insert(app.id.clone(), app);
     Ok(())
 }
 
-fn load_config(path: &std::path::Path) -> Result<AppConfig, String> {
+pub fn load_config(path: &std::path::Path) -> Result<AppConfig, String> {
     let data = fs::read_to_string(path).map_err(|e| e.to_string())?;
 
     serde_json::from_str(&data).map_err(|e| e.to_string())
 }
 
-fn save_config(path: &std::path::Path, app: &AppConfig) -> Result<(), String> {
+pub fn save_config(path: &std::path::Path, app: &AppConfig) -> Result<(), String> {
     let json = serde_json::to_string_pretty(app).map_err(|e| e.to_string())?;
 
     let tmp = path.with_extension("tmp");

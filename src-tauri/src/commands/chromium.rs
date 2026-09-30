@@ -1,24 +1,30 @@
 use std::process::Command;
-use std::path::PathBuf;
 use crate::utils::url::normalize_url;
 use crate::utils::browser::detect_chromium_browser;
+use crate::utils::paths::{app_dir_by_id, apps_dir};
 
 #[tauri::command]
 pub fn open_chromium_app_window(
+    id: Option<String>,
     title: String,
     url: String,
     browser: Option<String>
 ) -> Result<(), String> {
     let final_url = normalize_url(url)?;
-    let home = std::env::var("HOME").map_err(|_| "No HOME")?;
 
-    let mut profile_dir = PathBuf::from(home);
-    profile_dir.push(".local/share/kyvyrn/Apps");
-    profile_dir.push(&title);
+    let profile_dir = if let Some(app_id) = &id {
+        if let Ok(app_dir) = app_dir_by_id(app_id) {
+            app_dir.join("profile")
+        } else {
+            apps_dir().join(&title).join("profile")
+        }
+    } else {
+        apps_dir().join(&title).join("profile")
+    };
 
     std::fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
 
-    let browser_cmd = browser.unwrap_or(detect_chromium_browser()?);
+    let browser_cmd = browser.filter(|b| !b.is_empty()).unwrap_or(detect_chromium_browser()?);
 
     Command::new(browser_cmd)
         .arg(format!("--app={}", final_url))

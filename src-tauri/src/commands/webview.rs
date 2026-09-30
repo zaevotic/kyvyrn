@@ -1,29 +1,39 @@
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, Window};
-use tauri::webview::NewWindowResponse;
-use crate::utils::url::normalize_url;
-
 #[tauri::command]
 pub fn open_app_window(
-  window: Window,
-  label: String,
-  title: String,
-  url: String
+    id: Option<String>,
+    _label: Option<String>,
+    title: Option<String>,
+    url: Option<String>
 ) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| e.to_string())?;
 
-  let app_handle = window.app_handle();
-  let final_url = normalize_url(url)?;
+    if let Some(app_id) = id {
+        if let Ok(app_dir) = crate::utils::paths::app_dir_by_id(&app_id) {
+            let runner_path = app_dir.join("runner");
+            if runner_path.exists() {
+                std::process::Command::new(runner_path)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
 
-  WebviewWindowBuilder::new(
-    app_handle,
-    label,
-    WebviewUrl::External(final_url.parse().map_err(|_| "Invalid URL")?)
-  )
-  .on_new_window(|_, _| NewWindowResponse::Allow)
-  .title(&title)
-  .inner_size(1200.0, 800.0)
-  .resizable(true)
-  .build()
-  .map_err(|e| e.to_string())?;
+        std::process::Command::new(current_exe)
+            .arg("--launch-app")
+            .arg(&app_id)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
 
-  Ok(())
+    if let (Some(t), Some(u)) = (title, url) {
+        std::process::Command::new(current_exe)
+            .arg("--launch-url")
+            .arg(&u)
+            .arg(&t)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }

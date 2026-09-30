@@ -10,6 +10,12 @@ pub struct GlobalAppConfig {
     pub view_mode: String,
     pub theme: String,
     pub default_engine: Engine,
+    #[serde(default = "default_titlebar")]
+    pub titlebar: bool,
+}
+
+fn default_titlebar() -> bool {
+    true
 }
 
 impl Default for GlobalAppConfig {
@@ -18,6 +24,7 @@ impl Default for GlobalAppConfig {
             view_mode: "grid".to_string(),
             theme: "dark".to_string(),
             default_engine: Engine::WebKit,
+            titlebar: true,
         }
     }
 }
@@ -42,4 +49,9 @@ pub fn save_global_config(config: GlobalAppConfig) -> Result<(), String> {
 
     let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_window_decorations(window: tauri::Window, decorations: bool) -> Result<(), String> {
+    window.set_decorations(decorations).map_err(|e| e.to_string())
 }

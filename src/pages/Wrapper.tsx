@@ -1,1040 +1,741 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import type { AppDetails } from "../types/app";
 import type { Engine } from "../types/engine";
-import type { GlobalConfig } from "../types/globalConfig";
+import { Topbar } from "../ui/Topbar";
+import { type ScreenType } from "../ui/WorkspaceTabs";
+import { Tile, AddTile } from "../ui/Tile";
+import { Statusline } from "../ui/Statusline";
+import { ConfigDrawer } from "../ui/ConfigDrawer";
+import { OnboardingTrack } from "../ui/OnboardingTrack";
+import { useBrowsers, prettyBrowserName } from "../subsys/engine/useBrowsers";
+import { useGlobalConfig } from "../subsys/config/useGlobalConfig";
+import { useApps } from "../subsys/library/useApps";
+import { getStorageInfo } from "../subsys/storage/storageLabel";
 
-const THEME = {
-  dark: {
-    root: "bg-gray-950",
-    panel:
-      "bg-gray-900/60 border-gray-800/60 border backdrop-blur-xl border-rounded-2xl",
-    panelAlt: "bg-gray-800/40 border-gray-700/50 border-rounded-2xl",
-    text: "text-gray-100",
-    subText: "text-gray-400",
-    subSubText: "text-gray-500",
-    input:
-      "w-full px-4 py-3 rounded-xl bg-gray-900 text-gray-100 border border-gray-700/60 backdrop-blur-md shadow-inner shadow-black/20 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-gray-600 transition-all appearance-none placeholder:text-gray-600",
-    inputChoose:
-      "w-full px-4 py-1.75 rounded-xl bg-gray-900 text-gray-100 border border-gray-700/60 backdrop-blur-md shadow-inner shadow-black/20 focus:outline-none focus:ring-2 focus:ring-gray-600 focus:border-gray-600 transition-all appearance-none",
-    buttonPrimary: "bg-gray-100 hover:bg-white text-gray-950",
-    buttonSecondary: "bg-gray-700 hover:bg-gray-600 text-gray-100",
-    toggle: "bg-gray-800/60 border border-gray-700/60",
-    toggleButtonSelected: "bg-gray-100 text-gray-950",
-    toggleButtonUnselected: "text-gray-500 hover:bg-gray-700/50",
-    toggleButton:
-      "p-2 rounded-lg border border-gray-700/60 hover:bg-gray-800/60 text-gray-400 transition-colors",
-    appCard: "bg-gray-800/40 border border-gray-700/60 hover:bg-gray-700/50",
-    configButton: "bg-gray-800/90 hover:bg-gray-700/90",
-    configButtonText: "text-gray-300",
-    listConfigButton: "hover:bg-gray-800/50",
-    listConfigButtonText: "text-gray-500",
-    selectArrow: "text-gray-500",
-    iconBg: "bg-gradient-to-br from-gray-700 to-gray-800",
-    deleteButton: "bg-gray-700/90 hover:bg-gray-600",
-  },
-  light: {
-    root: "bg-gray-50",
-    panel:
-      "bg-white/80 border-gray-800/60 border backdrop-blur-xl border-rounded-2xl",
-    panelAlt: "bg-gray-100/60 border-gray-300/40 border-rounded-2xl",
-    text: "text-gray-950",
-    subText: "text-gray-600",
-    subSubText: "text-gray-500",
-    input:
-      "w-full px-4 py-3 rounded-xl bg-white text-gray-950 border border-gray-300/80 backdrop-blur-md shadow-inner shadow-gray-200/50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 transition-all appearance-none placeholder:text-gray-400",
-    inputChoose:
-      "w-full px-4 py-1.75 rounded-xl bg-white text-gray-950 border border-gray-300/80 backdrop-blur-md shadow-inner shadow-gray-200/50 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:border-gray-400 transition-all appearance-none",
-    buttonPrimary: "bg-gray-950 hover:bg-gray-800 text-white",
-    buttonSecondary: "bg-gray-400 hover:bg-gray-500 text-white",
-    toggle: "bg-gray-200/60 border border-gray-300/60",
-    toggleButtonSelected: "bg-gray-950 text-white",
-    toggleButtonUnselected: "text-gray-500 hover:bg-gray-300/50",
-    toggleButton:
-      "p-2 rounded-lg border border-gray-300/60 hover:bg-gray-200/60 transition-colors text-gray-600",
-    appCard: "bg-gray-100/60 border border-gray-300/60 hover:bg-gray-200/60",
-    configButton: "bg-gray-200/90 hover:bg-gray-300/90",
-    configButtonText: "text-gray-700",
-    listConfigButton: "hover:bg-gray-200/50",
-    listConfigButtonText: "text-gray-600",
-    selectArrow: "text-gray-600",
-    iconBg: "bg-gradient-to-br from-gray-300 to-gray-400",
-    deleteButton: "bg-gray-300/90 hover:bg-gray-400",
-  },
-} as const;
-
-interface AppDetails {
-  id: string;
-  url: string;
-  name: string;
-  description: string;
-  created_at: number;
-  engine?: Engine;
-  has_icon: boolean;
-  iconUrl?: string;
+function guessAppNameFromUrl(rawUrl: string): string {
+  try {
+    let clean = rawUrl.trim();
+    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+      clean = "https://" + clean;
+    }
+    const host = new URL(clean).hostname.replace(/^www\./, "");
+    const parts = host.split(".");
+    if (parts.length > 0 && parts[0]) {
+      return parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
+    }
+  } catch {}
+  return "";
 }
 
-export const prettyBrowserName = (cmd: string) => {
-  const map: Record<string, string> = {
-    "brave-browser": "Brave",
-    "brave-browser-stable": "Brave (Stable)",
-    "brave-browser-nightly": "Brave (Nightly)",
+export default function Wrapper() {
+  const [activeScreen, setActiveScreen] = useState<ScreenType>("library");
+  const [showSetup, setShowSetup] = useState(false);
 
-    "google-chrome": "Google Chrome",
-    "google-chrome-stable": "Google Chrome (Stable)",
+  // Global preferences
+  const { config, updateConfig, toggleTheme } = useGlobalConfig();
 
-    chromium: "Chromium",
-    "chromium-browser": "Chromium",
+  // Browsers
+  const { browsers } = useBrowsers();
 
-    vivaldi: "Vivaldi",
-    opera: "Opera",
-    "microsoft-edge": "Microsoft Edge",
-  };
+  // Library & Apps
+  const {
+    apps,
+    createApp,
+    updateApp,
+    setAppIconUrl,
+    deleteApp,
+    launchApp,
+  } = useApps();
 
-  return map[cmd] ?? cmd;
-};
+  // Config Drawer
+  const [configApp, setConfigApp] = useState<AppDetails | null>(null);
 
-function Wrapper() {
-  const [viewMode, setViewMode] = useState<GlobalConfig["viewMode"]>("grid");
+  // Add App Form State
+  const [newUrl, setNewUrl] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [newEngine, setNewEngine] = useState<Engine>({ kind: "webkit" });
+  const [creating, setCreating] = useState(false);
 
-  const [globalConfig, setGlobalConfig] = useState<GlobalConfig | null>(null);
-  const theme = THEME[globalConfig?.theme ?? "dark"];
-
-  const [url, setUrl] = useState("");
-  const [apps, setApps] = useState<AppDetails[]>([]);
-  const [showDetailsForm, setShowDetailsForm] = useState(false);
-  const [appName, setAppName] = useState("");
-  const [appDescription, setAppDescription] = useState("");
-
-  // Config panel state
-  const [showConfig, setShowConfig] = useState(false);
-  const [selectedApp, setSelectedApp] = useState<AppDetails | null>(null);
-  const [configEngine, setConfigEngine] = useState<Engine>({ kind: "webkit" });
-
-  const [availableBrowsers, setAvailableBrowsers] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const [configName, setConfigName] = useState("");
-  const [configUrl, setConfigUrl] = useState("");
-
-  const [refreshingIcon, setRefreshingIcon] = useState(false);
-
+  // Initialize engine with global default once config is loaded
   useEffect(() => {
-    invoke<GlobalConfig>("load_global_config").then((cfg) => {
-      setGlobalConfig(cfg);
-      setViewMode(cfg.viewMode);
-    });
+    if (config.defaultEngine) {
+      setNewEngine(config.defaultEngine);
+    }
+  }, [config.defaultEngine]);
+
+  // First visit onboarding check
+  useEffect(() => {
+    const hasSeenOnboarding = localStorage.getItem("kyvyrn_setup_done");
+    if (!hasSeenOnboarding) {
+      setShowSetup(true);
+    }
   }, []);
 
+  // Keyboard navigation
   useEffect(() => {
-    return () => {
-      apps.forEach((app) => {
-        if (app.iconUrl) {
-          URL.revokeObjectURL(app.iconUrl);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT";
+
+      if (e.key === "Escape") {
+        if (configApp) {
+          setConfigApp(null);
+        } else if (showSetup) {
+          setShowSetup(false);
         }
-      });
-    };
-  }, []);
-
-  useEffect(() => {
-    if (selectedApp) {
-      setConfigName(selectedApp.name);
-      setConfigUrl(selectedApp.url);
-      setConfigEngine(selectedApp.engine ?? { kind: "webkit" });
-    }
-  }, [selectedApp]);
-
-  useEffect(() => {
-    invoke<AppDetails[]>("load_apps").then(setApps);
-  }, []);
-
-  // Load available browsers on mount
-  useEffect(() => {
-    loadAvailableBrowsers();
-  }, []);
-
-  useEffect(() => {
-    invoke<string[]>("detect_chromium_browsers")
-      .then(setAvailableBrowsers)
-      .catch(() => setAvailableBrowsers([]));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      const updates = await Promise.all(
-        apps.map(async (app) => {
-          if (app.iconUrl) return app;
-
-          try {
-            const bytes = await invoke<number[]>("get_icon_bytes", {
-              appId: app.id,
-            });
-
-            const blob = new Blob([new Uint8Array(bytes)], {
-              type: "image/png",
-            });
-            const url = URL.createObjectURL(blob);
-
-            return { ...app, iconUrl: url };
-          } catch {
-            return app;
-          }
-        })
-      );
-
-      if (!cancelled) {
-        setApps((prev) =>
-          prev.map((app, i) => (app.iconUrl ? app : updates[i]))
-        );
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [apps.length]);
-
-  const mergeApps = (oldApps: AppDetails[], newApps: AppDetails[]) => {
-    const byId = new Map(oldApps.map(app => [app.id, app]));
-
-    return newApps.map(app => {
-      const existing = byId.get(app.id);
-
-      // Preserve frontend-only state
-      if (existing?.iconUrl) {
-        return { ...app, iconUrl: existing.iconUrl };
+        return;
       }
 
-      return app;
-    });
-  };
+      if (isInput) return;
 
-  const updateGlobalConfig = (patch: Partial<GlobalConfig>) => {
-    if (!globalConfig) return;
+      if (e.key === "1") {
+        setActiveScreen("library");
+      } else if (e.key === "2") {
+        setActiveScreen("add");
+      } else if (e.key === "3") {
+        setActiveScreen("settings");
+      }
+    };
 
-    const updated = { ...globalConfig, ...patch };
-    setGlobalConfig(updated);
-    invoke("save_global_config", { config: updated });
-  };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [configApp, showSetup]);
 
-  const prettyEngineName = (engine?: Engine) => {
-    if (!engine) return "WebKit";
-
-    if (engine.kind === "webkit") {
-      return "WebKit";
+  const handleUrlChange = (val: string) => {
+    setNewUrl(val);
+    if (!newName.trim() || newName === guessAppNameFromUrl(newUrl)) {
+      const guessed = guessAppNameFromUrl(val);
+      if (guessed) setNewName(guessed);
     }
-
-    if (engine.kind === "chromium") {
-      return `Chromium • ${prettyBrowserName(engine.browser)}`;
-    }
-
-    return "Unknown";
   };
 
-  const loadAvailableBrowsers = async () => {
+  const handleCreateApp = async () => {
+    if (!newUrl.trim() || !newName.trim() || creating) return;
+
+    setCreating(true);
     try {
-      const browsers = await invoke<string[]>("detect_chromium_browsers");
-      setAvailableBrowsers(browsers);
+      await createApp({
+        name: newName,
+        url: newUrl,
+        description: newDescription,
+        engine: newEngine,
+      });
+
+      setNewUrl("");
+      setNewName("");
+      setNewDescription("");
+      setNewEngine(config.defaultEngine || { kind: "webkit" });
+      setActiveScreen("library");
     } catch (err) {
-      console.error("Failed to load browsers:", err);
-      setAvailableBrowsers([]);
-    }
-  };
-
-  const handleGenerate = () => {
-    if (!url) return;
-    setShowDetailsForm(true);
-  };
-
-  const handleSaveApp = async () => {
-    if (!appName.trim()) return;
-    setLoading(true);
-    const id = Date.now().toString();
-
-    const app = {
-      id,
-      name: appName.trim(),
-      url,
-      description: appDescription.trim(),
-      created_at: Date.now(),
-      engine: globalConfig?.defaultEngine ?? { kind: "webkit" },
-    };
-
-    try {
-      await invoke("fetch_site_icon", {
-        appId: app.id,
-        url: app.url,
-      });
-
-      await invoke("save_app", {
-        app: {
-          ...app,
-          folder: "",
-        },
-      });
-
-      const updatedApps = await invoke<AppDetails[]>("load_apps");
-      setApps(updatedApps);
-
-      setUrl("");
-      setAppName("");
-      setAppDescription("");
-      setShowDetailsForm(false);
-    } catch (error) {
-      console.error("Failed to save app:", error);
-      alert("Failed to save app.");
+      console.error("Failed to create app:", err);
+      alert("Failed to create app.");
     } finally {
-      setLoading(false);
+      setCreating(false);
     }
   };
 
-  const handleCancel = () => {
-    setShowDetailsForm(false);
-    setAppName("");
-    setAppDescription("");
-  };
+  const isNewWebkit = newEngine.kind === "webkit";
+  const isNewChromium = newEngine.kind === "chromium";
+  const selectedNewBrowser = isNewChromium
+    ? newEngine.browser
+    : browsers[0] || "brave";
 
-  const handleLaunchApp = async (app: AppDetails) => {
-    try {
-      if (app.engine?.kind === "chromium") {
-        await invoke("open_chromium_app_window", {
-          title: app.name,
-          url: app.url,
-          browser: app.engine.browser,
-        });
-      } else {
-        await invoke("open_app_window", {
-          label: `app-${Date.now()}`,
-          title: app.name,
-          url: app.url,
-        });
-      }
-    } catch (error) {
-      console.error("Failed to launch app:", error);
-      alert(`Failed to launch ${app.name}`);
-    }
-  };
-
-  const openAppConfig = (app: AppDetails) => {
-    if (selectedApp?.id === app.id && showConfig) {
-      closeConfig();
-    } else {
-      setSelectedApp(app);
-      setConfigEngine(app.engine ?? { kind: "webkit" });
-      setShowConfig(true);
-    }
-  };
-
-  const closeConfig = () => {
-    setShowConfig(false);
-    setSelectedApp(null);
-  };
-
-  useEffect(() => {
-    if (selectedApp) {
-      setConfigName(selectedApp.name);
-      setConfigUrl(selectedApp.url);
-    }
-  }, [selectedApp]);
-
-  useEffect(() => {
-    invoke<GlobalConfig>("load_global_config").then((cfg) => {
-      console.log("Loaded global config:", cfg);
-      setGlobalConfig(cfg);
-      setViewMode(cfg.viewMode);
-    });
-  }, []);
-
-  const saveAppConfig = async () => {
-    if (!selectedApp) return;
-
-    await invoke("update_app_config", {
-      id: selectedApp.id,
-      name: configName,
-      url: configUrl,
-      engine: configEngine,
-    });
-
-    const updated = await invoke<AppDetails[]>("load_apps");
-    setApps(prev => mergeApps(prev, updated));
-
-    closeConfig();
-  };
+  const newStorageInfo = getStorageInfo(newEngine);
 
   return (
     <>
-      <div
-        className={`select-none cursor-default [&_button]:cursor-pointer h-screen ${theme.root} flex overflow-hidden p-4 gap-2 relative`}
-      >
-        <div className="fixed inset-0 z-0">
-          <div className="absolute inset-0 grid-pattern opacity-20"></div>
-        </div>
-        {/* Left Panel - Create New App */}
-        <div className="w-full lg:w-1/2 overflow-hidden rounded-xl relative">
+      <div className="bg-grid"></div>
+
+      <div className="shell">
+        {/* TOPBAR */}
+        <Topbar
+          activeScreen={activeScreen}
+          onSelectScreen={setActiveScreen}
+          onOpenSetup={() => setShowSetup(true)}
+          onToggleTheme={toggleTheme}
+        />
+
+        {/* MAIN BODY */}
+        <div className="main">
+          {/* SCREEN 1: LIBRARY */}
           <div
-            className={`h-full p-6 backdrop-blur-xl rounded-xl shadow-2xl flex flex-col ${theme.panel}`}
+            className={`screen ${activeScreen === "library" ? "active" : ""}`}
+            id="screen-library"
           >
-            <h2 className={`text-2xl font-bold mb-6 ${theme.text}`}>
-              Create New App
-            </h2>
-
-            {!showDetailsForm ? (
-              <div className="flex-1 flex flex-col">
-                <div className="mb-4">
-                  <label
-                    htmlFor="url"
-                    className={`block text-sm font-medium mb-2 ${theme.subText}`}
-                  >
-                    Enter Website URL
-                  </label>
-                  <input
-                    type="url"
-                    id="url"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    placeholder="example.com or https://example.com"
-                    className={theme.input}
-                  />
+            <div className="col-title">
+              <h1>your apps</h1>
+              <span className="count">{apps.length} installed</span>
+            </div>
+            <div className="lib-body">
+              {config.viewMode === "grid" ? (
+                <div className="grid">
+                  {apps.map((app) => (
+                    <Tile
+                      key={app.id}
+                      app={app}
+                      onLaunch={launchApp}
+                      onConfigure={setConfigApp}
+                    />
+                  ))}
+                  <AddTile onClick={() => setActiveScreen("add")} />
                 </div>
-                <button
-                  onClick={handleGenerate}
-                  className={`w-full py-3 px-4 rounded-lg transition-colors font-medium ${theme.buttonPrimary}`}
-                >
-                  Generate App
-                </button>
+              ) : (
+                /* List View */
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {apps.map((app) => {
+                    const isChromium = app.engine.kind === "chromium";
+                    return (
+                      <div
+                        key={app.id}
+                        onClick={() => launchApp(app)}
+                        className="tile"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          padding: "12px 14px",
+                          textAlign: "left",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "12px",
+                            minWidth: 0,
+                          }}
+                        >
+                          <div
+                            className="ico"
+                            style={{
+                              width: "36px",
+                              height: "36px",
+                              margin: 0,
+                              borderRadius: "6px",
+                              fontSize: "15px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {app.iconUrl ? (
+                              <img
+                                src={app.iconUrl}
+                                alt={app.name}
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <span>{(app.name[0] || "?").toUpperCase()}</span>
+                            )}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div className="name" style={{ fontSize: "13px" }}>
+                              {app.name}
+                            </div>
+                            <div
+                              style={{
+                                fontSize: "11px",
+                                color: "var(--text-faint)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                maxWidth: "400px",
+                              }}
+                            >
+                              {app.description || app.url}
+                            </div>
+                          </div>
+                        </div>
 
-                <div
-                  className={`mt-8 p-4 rounded-lg text-sm ${theme.panelAlt} ${theme.subText}`}
-                >
-                  <p className="mb-2">
-                    <strong>How it works:</strong>
-                  </p>
-                  <ul className="space-y-1 list-disc list-inside">
-                    <li>Enter any website URL</li>
-                    <li>Add app name and description</li>
-                    <li>Choose default browser engine</li>
-                    <li>Launch as native app</li>
-                  </ul>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "14px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <div
+                            className={`eng ${isChromium ? "chrome" : ""}`}
+                            style={{ marginTop: 0 }}
+                          >
+                            <i></i>
+                            {app.engine.kind === "chromium"
+                              ? `chromium (${prettyBrowserName(
+                                  app.engine.browser
+                                )})`
+                              : "webview"}
+                          </div>
+
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            style={{ width: "26px", height: "26px" }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfigApp(app);
+                            }}
+                          >
+                            ⚙
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div
+                    onClick={() => setActiveScreen("add")}
+                    className="tile add"
+                    style={{
+                      flexDirection: "row",
+                      minHeight: "44px",
+                      padding: "10px",
+                    }}
+                  >
+                    <div className="plus" style={{ fontSize: "16px" }}>
+                      +
+                    </div>
+                    <div className="name">new app</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* SCREEN 2: ADD APP */}
+          <div
+            className={`screen ${activeScreen === "add" ? "active" : ""}`}
+            id="screen-add"
+          >
+            <div className="add-wrap">
+              <div className="lib-mini">
+                <div className="col-title">
+                  <h1>your apps</h1>
+                </div>
+                <div className="lib-body">
+                  <div className="grid">
+                    {apps.map((app) => (
+                      <div
+                        key={app.id}
+                        className="tile"
+                        style={{ padding: "10px 8px" }}
+                      >
+                        <div
+                          className="ico"
+                          style={{
+                            width: "32px",
+                            height: "32px",
+                            marginBottom: "6px",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {app.iconUrl ? (
+                            <img src={app.iconUrl} alt="" />
+                          ) : (
+                            <span>{app.name[0]}</span>
+                          )}
+                        </div>
+                        <div className="name" style={{ fontSize: "11px" }}>
+                          {app.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-4 flex-1">
-                <div>
-                  <label
-                    htmlFor="appName"
-                    className={`block text-sm font-medium ${theme.text} mb-2`}
-                  >
-                    App Name
-                  </label>
+
+              <div className="add-col">
+                <div className="col-title" style={{ padding: "0 0 16px" }}>
+                  <h1 style={{ fontSize: "15px" }}>new app</h1>
+                </div>
+
+                <div className="field">
+                  <label>site url</label>
                   <input
                     type="text"
-                    id="appName"
-                    value={appName}
-                    onChange={(e) => setAppName(e.target.value)}
-                    placeholder="App Name"
-                    className={theme.input}
+                    value={newUrl}
+                    onChange={(e) => handleUrlChange(e.target.value)}
+                    placeholder="example.com"
                   />
                 </div>
-                <div>
-                  <label
-                    htmlFor="appName"
-                    className={`block text-sm font-medium ${theme.text} mb-2`}
-                  >
-                    Description (optional)
+
+                <div className="field">
+                  <label>name</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="App Name"
+                  />
+                </div>
+
+                <div className="field">
+                  <label>
+                    description{" "}
+                    <span style={{ color: "var(--text-faint)" }}>
+                      (optional)
+                    </span>
                   </label>
                   <textarea
-                    id="appDescription"
-                    value={appDescription}
-                    onChange={(e) => setAppDescription(e.target.value)}
-                    placeholder="Give it a description..."
-                    rows={3}
-                    className={theme.input}
+                    rows={2}
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    placeholder="Short description"
                   />
                 </div>
-                <div className="flex gap-2 pt-4">
-                  <button
-                    onClick={handleSaveApp}
-                    disabled={loading}
-                    className={`flex-1 py-3 px-4 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed ${theme.buttonPrimary}`}
-                  >
-                    {loading ? "Saving..." : "Save App"}
-                  </button>
-                  <button
-                    onClick={handleCancel}
-                    disabled={loading}
-                    className={`flex-1 py-3 px-4 rounded-lg transition-colors font-medium disabled:opacity-50 ${theme.buttonSecondary}`}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Config Panel */}
-          <div
-            className={`absolute bottom-0 left-0 right-0 h-full p-6 ${
-              theme.panel
-            } backdrop-blur-xl rounded-xl shadow-2xl flex flex-col transition-transform duration-300 ${
-              showConfig ? "translate-y-0" : "translate-y-full"
-            }`}
-          >
-            {showConfig && selectedApp && (
-              <>
-                <div className="flex justify-between items-start mb-6 mt-4">
-                  <div>
-                    <h2 className={`text-2xl font-bold ${theme.text}`}>
-                      App Configuration
-                    </h2>
-                    <p className={`text-sm ${theme.subText} mt-1`}>
-                      {selectedApp.name}
-                    </p>
-                  </div>
-                  <button
-                    onClick={closeConfig}
-                    className={`p-2 rounded-lg transition-colors ${theme.listConfigButton}`}
-                  >
-                    <svg
-                      className={`w-5 h-5 ${theme.listConfigButtonText}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                <div className="field">
+                  <label>engine</label>
+                  <div className="opt-row">
+                    <div
+                      className={`opt-card ${isNewWebkit ? "selected" : ""}`}
+                      onClick={() => setNewEngine({ kind: "webkit" })}
                     >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                </div>
-
-                <div className="space-y-6 flex-1 my-3 overflow-y-auto">
-                  <div className="space-y-4">
-                    {/* App Name */}
-                    <div>
-                      <label
-                        className={`block text-sm font-medium ${theme.subText} mb-2`}
-                      >
-                        App Name
-                      </label>
-                      <input
-                        value={configName}
-                        onChange={(e) => setConfigName(e.target.value)}
-                        className={`${theme.input}`}
-                        placeholder="My Cool App"
-                      />
+                      <div className="t">WebView</div>
+                      <div className="d">system engine</div>
                     </div>
-
-                    {/* App URL */}
-                    <div>
-                      <label
-                        className={`block text-sm font-medium ${theme.subText} mb-2`}
-                      >
-                        App URL
-                      </label>
-                      <input
-                        value={configUrl}
-                        onChange={(e) => setConfigUrl(e.target.value)}
-                        className={`${theme.input}`}
-                        placeholder="https://example.com"
-                      />
+                    <div
+                      className={`opt-card ${isNewChromium ? "selected" : ""}`}
+                      onClick={() =>
+                        setNewEngine({
+                          kind: "chromium",
+                          browser: selectedNewBrowser,
+                        })
+                      }
+                    >
+                      <div className="t">Chromium</div>
+                      <div className="d">
+                        {prettyBrowserName(selectedNewBrowser)}
+                      </div>
                     </div>
                   </div>
 
-                  <div>
-                    <label
-                      className={`block text-sm font-medium ${theme.subText} mb-2`}
-                    >
-                      Browser Engine
-                    </label>
-
-                    <div className="relative">
-                      <select
-                        value={
-                          configEngine.kind === "webkit"
-                            ? "webkit"
-                            : `chromium:${configEngine.browser}`
-                        }
-                        onChange={(e) => {
-                          const value = e.target.value;
-
-                          if (value === "webkit") {
-                            setConfigEngine({ kind: "webkit" });
-                          } else {
-                            const [, browser] = value.split(":");
-                            setConfigEngine({
-                              kind: "chromium",
-                              browser,
-                            });
-                          }
-                        }}
-                        className={`${theme.input}`}
-                      >
-                        {/* WebView */}
-                        <option value="webkit">WebView (Default)</option>
-
-                        {/* Chromium browsers */}
-                        {availableBrowsers.length > 0 && (
-                          <optgroup label="Chromium browsers">
-                            {availableBrowsers.map((b) => (
-                              <option key={b} value={`chromium:${b}`}>
-                                {prettyBrowserName(b)}
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </select>
-
-                      <svg
-                        className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.selectArrow} pointer-events-none`}
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    </div>
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      onClick={saveAppConfig}
-                      className={`w-full py-2 px-4 rounded-lg transition-colors font-medium ${theme.buttonPrimary}`}
-                    >
-                      Save Configuration
-                    </button>
-                  </div>
-
-                  <div className="pt-2">
-                    <div className="flex gap-2">
-                      <button
-                        disabled={refreshingIcon}
-                        onClick={async () => {
-                          if (!selectedApp || refreshingIcon) return;
-
-                          setRefreshingIcon(true);
-
-                          try {
-                            await invoke("refresh_site_icon", {
-                              appId: selectedApp.id,
-                              url: selectedApp.url,
-                            });
-
-                            const bytes = await invoke<number[]>(
-                              "get_icon_bytes",
-                              {
-                                appId: selectedApp.id,
-                              }
-                            );
-
-                            const blob = new Blob([new Uint8Array(bytes)], {
-                              type: "image/png",
-                            });
-                            const newUrl = URL.createObjectURL(blob);
-
-                            setApps((prev) =>
-                              prev.map((app) => {
-                                if (app.id !== selectedApp.id) return app;
-
-                                if (app.iconUrl) {
-                                  URL.revokeObjectURL(app.iconUrl);
-                                }
-
-                                return { ...app, iconUrl: newUrl };
-                              })
-                            );
-                          } catch (err) {
-                            console.error("Icon refresh failed:", err);
-                            alert("Failed to refresh icon");
-                          } finally {
-                            setRefreshingIcon(false);
-                          }
-                        }}
-                        className={`flex-1 py-2 rounded-lg disabled:opacity-50 transition-colors font-medium ${theme.buttonSecondary}`}
-                      >
-                        {refreshingIcon ? "Refreshing..." : "Refresh Icon"}
-                      </button>
-
-                      <label className="flex-1 block">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          hidden
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-
-                            const bytes = new Uint8Array(
-                              await file.arrayBuffer()
-                            );
-
-                            await invoke("save_app_icon", {
-                              appId: selectedApp.id,
-                              iconBytes: Array.from(bytes),
-                            });
-
-                            const blob = new Blob([bytes], {
-                              type: "image/png",
-                            });
-                            const url = URL.createObjectURL(blob);
-
-                            setApps((prev) =>
-                              prev.map((app) => {
-                                if (app.id !== selectedApp.id) return app;
-
-                                if (app.iconUrl) {
-                                  URL.revokeObjectURL(app.iconUrl);
-                                }
-
-                                return { ...app, iconUrl: url };
-                              })
-                            );
-                          }}
-                        />
+                  {isNewChromium && browsers.length > 0 && (
+                    <div className="browser-pick" style={{ marginTop: "10px" }}>
+                      {browsers.map((b) => (
                         <span
-                          className={`w-full block text-center py-2 rounded-lg transition-colors font-medium ${theme.buttonSecondary}`}
+                          key={b}
+                          className={
+                            isNewChromium && newEngine.browser === b ? "on" : ""
+                          }
+                          onClick={() =>
+                            setNewEngine({ kind: "chromium", browser: b })
+                          }
                         >
-                          Upload Icon
+                          {prettyBrowserName(b)}
                         </span>
-                      </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label>storage</label>
+                  <div
+                    className="hint"
+                    style={{ marginTop: "-2px", marginBottom: "8px" }}
+                  >
+                    automatic — follows the engine above
+                  </div>
+                  <div
+                    className="opt-card selected"
+                    style={{ cursor: "default" }}
+                  >
+                    <div className="t">{newStorageInfo.title}</div>
+                    <div className="d">{newStorageInfo.description}</div>
+                  </div>
+                </div>
+
+                <div style={{ flex: 1 }}></div>
+
+                <button
+                  type="button"
+                  disabled={creating || !newUrl.trim() || !newName.trim()}
+                  onClick={handleCreateApp}
+                  className="btn btn-primary btn-block"
+                >
+                  {creating ? "creating..." : "create app →"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* SCREEN 3: SETTINGS */}
+          <div
+            className={`screen ${activeScreen === "settings" ? "active" : ""}`}
+            id="screen-settings"
+          >
+            <div className="add-wrap">
+              <div className="lib-mini">
+                <div className="col-title">
+                  <h1>your apps</h1>
+                </div>
+                <div className="lib-body">
+                  <div className="grid">
+                    {apps.map((app) => (
+                      <div
+                        key={app.id}
+                        className="tile"
+                        style={{ padding: "10px 8px" }}
+                      >
+                        <div
+                          className="ico"
+                          style={{
+                            width: "32px",
+                            height: "32px",
+                            marginBottom: "6px",
+                            fontSize: "13px",
+                          }}
+                        >
+                          {app.iconUrl ? (
+                            <img src={app.iconUrl} alt="" />
+                          ) : (
+                            <span>{app.name[0]}</span>
+                          )}
+                        </div>
+                        <div className="name" style={{ fontSize: "11px" }}>
+                          {app.name}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="add-col">
+                <div className="col-title" style={{ padding: "0 0 16px" }}>
+                  <h1 style={{ fontSize: "15px" }}>settings</h1>
+                </div>
+
+                <div className="set-group">
+                  <h3>defaults</h3>
+
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">default engine</div>
+                      <div className="sub">
+                        used for new apps unless overridden
+                      </div>
+                    </div>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={
+                          config.defaultEngine.kind === "webkit" ? "on" : ""
+                        }
+                        onClick={() =>
+                          updateConfig({ defaultEngine: { kind: "webkit" } })
+                        }
+                      >
+                        WebView
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          config.defaultEngine.kind === "chromium" ? "on" : ""
+                        }
+                        onClick={() =>
+                          updateConfig({
+                            defaultEngine: {
+                              kind: "chromium",
+                              browser: browsers[0] || "chromium",
+                            },
+                          })
+                        }
+                      >
+                        Chromium
+                      </button>
                     </div>
                   </div>
 
-                  <div
-                    className={`pt-4 border-t ${
-                      globalConfig?.theme === "dark"
-                        ? "border-gray-700/50"
-                        : "border-gray-300/50"
-                    }`}
-                  >
-                    <button
-                      onClick={async () => {
-                        if (
-                          !confirm(
-                            `Delete ${selectedApp.name}? This cannot be undone.`
-                          )
-                        )
-                          return;
+                  {browsers.length > 0 && (
+                    <div className="set-row">
+                      <div>
+                        <div className="lbl">chromium browser</div>
+                        <div className="sub">detected on this system</div>
+                      </div>
+                      <div className="seg">
+                        {browsers.map((b) => {
+                          const isSelected =
+                            config.defaultEngine.kind === "chromium" &&
+                            config.defaultEngine.browser === b;
+                          return (
+                            <button
+                              key={b}
+                              type="button"
+                              className={isSelected ? "on" : ""}
+                              onClick={() =>
+                                updateConfig({
+                                  defaultEngine: {
+                                    kind: "chromium",
+                                    browser: b,
+                                  },
+                                })
+                              }
+                            >
+                              {prettyBrowserName(b)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                        await invoke("delete_app", { id: selectedApp.id });
-                        const updated = await invoke<AppDetails[]>("load_apps");
-                        setApps(prev => mergeApps(prev, updated));
-                        closeConfig();
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">storage format</div>
+                      <div className="sub">
+                        chromium apps → PWA shortcut · webview apps → compiled +
+                        .desktop, automatic per app
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        color: "var(--text-faint)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "2px",
+                        padding: "3px 8px",
                       }}
-                      className="w-full bg-red-600/90 hover:bg-red-700 text-white py-2 rounded-lg transition-colors font-medium"
                     >
-                      Remove App
+                      auto
+                    </span>
+                  </div>
+                </div>
+
+                <div className="set-group">
+                  <h3>appearance</h3>
+
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">view mode</div>
+                      <div className="sub">library layout</div>
+                    </div>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={config.viewMode === "grid" ? "on" : ""}
+                        onClick={() => updateConfig({ viewMode: "grid" })}
+                      >
+                        Grid
+                      </button>
+                      <button
+                        type="button"
+                        className={config.viewMode === "list" ? "on" : ""}
+                        onClick={() => updateConfig({ viewMode: "list" })}
+                      >
+                        List
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">theme</div>
+                      <div className="sub">
+                        follows manual toggle, not system
+                      </div>
+                    </div>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={config.theme === "dark" ? "on" : ""}
+                        onClick={() => updateConfig({ theme: "dark" })}
+                      >
+                        Dark
+                      </button>
+                      <button
+                        type="button"
+                        className={config.theme === "light" ? "on" : ""}
+                        onClick={() => updateConfig({ theme: "light" })}
+                      >
+                        Light
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">window titlebar</div>
+                      <div className="sub">
+                        native window decorations on web apps
+                      </div>
+                    </div>
+                    <div className="seg">
+                      <button
+                        type="button"
+                        className={config.titlebar !== false ? "on" : ""}
+                        onClick={() => updateConfig({ titlebar: true })}
+                      >
+                        Show
+                      </button>
+                      <button
+                        type="button"
+                        className={config.titlebar === false ? "on" : ""}
+                        onClick={() => updateConfig({ titlebar: false })}
+                      >
+                        Hide
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="set-group">
+                  <h3>onboarding</h3>
+
+                  <div className="set-row">
+                    <div>
+                      <div className="lbl">first-run setup</div>
+                      <div className="sub">
+                        re-run the engine &amp; storage wizard
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      onClick={() => setShowSetup(true)}
+                    >
+                      replay ↺
                     </button>
                   </div>
                 </div>
-              </>
-            )}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Right Panel */}
-        <div
-          className={`flex-1 pt-4 p-6 backdrop-blur-xl rounded-xl shadow-2xl ml-1.5 ${theme.panel}`}
-        >
-          <div className="mb-6 flex justify-between items-center">
-            <h1 className={`text-2xl font-bold ${theme.text}`}>
-              Your Apps ({apps.length})
-            </h1>
-
-            <div className="flex items-center gap-4">
-              {/* Default Engine Selector */}
-              <div className="relative">
-                <select
-                  value={
-                    globalConfig?.defaultEngine.kind === "webkit"
-                      ? "webkit"
-                      : `chromium:${globalConfig?.defaultEngine.browser}`
-                  }
-                  onChange={(e) => {
-                    const value = e.target.value;
-
-                    let engine: Engine;
-                    if (value === "webkit") {
-                      engine = { kind: "webkit" };
-                    } else {
-                      const [, browser] = value.split(":");
-                      engine = { kind: "chromium", browser };
-                    }
-
-                    const updated = { ...globalConfig!, defaultEngine: engine };
-                    setGlobalConfig(updated);
-                    invoke("save_global_config", { config: updated });
-                  }}
-                  className={theme.inputChoose}
-                >
-                  {/* WebView option */}
-                  <option value="webkit">WebView</option>
-
-                  {/* Chromium browsers */}
-                  {availableBrowsers.length > 0 && (
-                    <optgroup label="Chromium browsers">
-                      {availableBrowsers.map((b) => (
-                        <option key={b} value={`chromium:${b}`}>
-                          {prettyBrowserName(b)}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-
-                <svg
-                  className={`absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 ${theme.selectArrow} pointer-events-none`}
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
-
-              {/* View Mode Toggle */}
-              <div className={`flex ${theme.toggle} rounded-lg p-1`}>
-                <button
-                  onClick={() => {
-                    setViewMode("grid");
-                    updateGlobalConfig({ viewMode: "grid" });
-                  }}
-                  className={`p-1 rounded transition-colors ${
-                    viewMode === "grid"
-                      ? theme.toggleButtonSelected
-                      : theme.toggleButtonUnselected
-                  }`}
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    setViewMode("list");
-                    updateGlobalConfig({ viewMode: "list" });
-                  }}
-                  className={`p-1 rounded transition-colors ${
-                    viewMode === "list"
-                      ? theme.toggleButtonSelected
-                      : theme.toggleButtonUnselected
-                  }`}
-                >
-                  <svg
-                    className="w-5 h-5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path d="M3 13h18v-2H3v2zm0 5h18v-2H3v2zM3 6v2h18V6H3z" />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Theme Toggle */}
-              <button
-                onClick={() => {
-                  if (!globalConfig) return;
-
-                  const updated = {
-                    ...globalConfig,
-                    theme: globalConfig.theme === "dark" ? "light" : "dark",
-                  } as GlobalConfig;
-
-                  setGlobalConfig(updated);
-                  invoke("save_global_config", { config: updated });
-                }}
-                className={theme.toggleButton}
-                title="Toggle theme"
-              >
-                {globalConfig?.theme === "dark" ? (
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <circle cx="12" cy="12" r="5" />
-                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-                  </svg>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {apps.length === 0 ? (
-            <div
-              className={`flex items-center justify-center h-96 rounded-lg border-2 border-dashed ${theme.panelAlt} ${theme.subText}`}
-            >
-              <p className="text-center">
-                No apps created yet.
-                <br />
-                Generate your first app to get started!
-              </p>
-            </div>
-          ) : viewMode === "grid" ? (
-            /* Grid View */
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-              {apps.map((app) => (
-                <div
-                  key={app.id}
-                  className={`group p-4 rounded-lg hover:shadow-lg transition-all cursor-pointer relative ${theme.appCard}`}
-                >
-                  <div onClick={() => handleLaunchApp(app)}>
-                    <div className="aspect-square rounded-lg mb-3 flex items-center justify-center overflow-hidden">
-                      {app.iconUrl ? (
-                        <img
-                          src={app.iconUrl}
-                          alt={app.name}
-                          className="w-18 h-18 object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              parent.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-linear-to-br from-blue-500 to-purple-600 text-white text-4xl font-bold">${app.name[0].toUpperCase()}</div>`;
-                            }
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-linear-to-br from-blue-500 to-purple-600 text-white text-4xl font-bold">
-                          {app.name[0].toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                    <h3
-                      className={`font-semibold ${theme.text} text-center truncate`}
-                    >
-                      {app.name}
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => openAppConfig(app)}
-                    className={`absolute top-2 right-2 p-2 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity ${theme.configButton}`}
-                  >
-                    <svg
-                      className={`w-4 h-4 ${theme.configButtonText}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            /* List View */
-            <div className="space-y-2">
-              {apps.map((app) => (
-                <div
-                  key={app.id}
-                  className={`p-4 rounded-lg hover:shadow-md transition-all flex items-center gap-4 group ${theme.appCard}`}
-                >
-                  <div
-                    onClick={() => handleLaunchApp(app)}
-                    className="flex items-center gap-4 flex-1 cursor-pointer"
-                  >
-                    <div className="w-16 h-16 rounded-lg flex items-center justify-center shrink-0 overflow-hidden">
-                      {app.iconUrl ? (
-                        <img
-                          src={app.iconUrl}
-                          alt={app.name}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.currentTarget.style.display = "none";
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              parent.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-linear-to-br from-blue-500 to-purple-600 text-white text-2xl font-bold">${app.name[0].toUpperCase()}</div>`;
-                            }
-                          }}
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center bg-linear-to-br from-blue-500 to-purple-600 text-white text-2xl font-bold">
-                          {app.name[0].toUpperCase()}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className={`font-semibold ${theme.text} truncate`}>
-                        {app.name}
-                      </h3>
-                      <p className={`text-sm ${theme.subText} truncate`}>
-                        {app.description || app.url}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {prettyEngineName(app.engine)} • Created{" "}
-                        {new Date(app.created_at).toLocaleDateString()}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => openAppConfig(app)}
-                    className={`p-2 rounded-lg transition-colors ${theme.listConfigButton}`}
-                  >
-                    <svg
-                      className={`w-5 h-5 ${theme.listConfigButtonText}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* STATUSLINE FOOTER */}
+        <Statusline activeScreen={activeScreen} />
       </div>
+
+      {/* CONFIG SIDE DRAWER */}
+      <ConfigDrawer
+        app={configApp}
+        isOpen={Boolean(configApp)}
+        onClose={() => setConfigApp(null)}
+        onSave={updateApp}
+        onDelete={deleteApp}
+        onIconUpdated={setAppIconUrl}
+        availableBrowsers={browsers}
+      />
+
+      {/* ONBOARDING SETUP WIZARD */}
+      <OnboardingTrack
+        isOpen={showSetup}
+        onClose={() => {
+          localStorage.setItem("kyvyrn_setup_done", "true");
+          setShowSetup(false);
+        }}
+        onComplete={(engine) => {
+          updateConfig({ defaultEngine: engine });
+          localStorage.setItem("kyvyrn_setup_done", "true");
+        }}
+        availableBrowsers={browsers}
+        initialEngine={config.defaultEngine || { kind: "webkit" }}
+      />
     </>
   );
 }
-
-export default Wrapper;

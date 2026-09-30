@@ -1,31 +1,36 @@
 # Kyvyrn
 
-Kyvyrn is a lightweight, Linux-first desktop app wrapper that turns web apps into clean, native-feeling applications — without Electron overhead.
+Kyvyrn is a lightweight, Linux-first desktop app manager that turns web apps into clean, native-feeling applications — without Electron overhead.
 
-Built with **React, TypeScript, Vite, and Tauri**, Kyvyrn focuses on performance, transparency, and sane defaults.
+Built with **Tauri v2 (Rust), React 19, TypeScript, and Vite**, Kyvyrn manages both **Chromium PWA shortcuts** and **autonomous WebKit desktop apps** with full system launcher integration.
 
 ---
 
 ## Features
 
-- **Web → Native Wrapping**: Convert any website into a native desktop app
-- **App-Mode Launching**: No tabs, no address bar, no browser UI clutter
-- **Smart Browser Detection**:
-  - Brave → Chrome → Chromium → Vivaldi → Opera → Edge
-- **Per-App Configuration**: Each wrapped app has its own isolated config
-- **Global Defaults**: Theme mode, layout preferences, and UI defaults for new apps
-- **Modern UI**: Clean, responsive interface built with Tailwind CSS
-- **Lightweight by Design**: Uses system web engines via Tauri (no Electron)
+- **Dual-Engine Architecture**:
+  - **WebKit (WebView)**: Standalone, segregated processes with isolated session data (`webkit_data/`) and autonomous micro-runners deployed to user space.
+  - **Chromium (PWA)**: Standalone app-mode launches (`--app=`) with isolated per-app profiles (`profile/`).
+- **System Desktop Launcher Integration**:
+  - Automatically writes and synchronizes XDG `.desktop` entries in `~/.local/share/applications/`.
+  - Scrapes, standardizes, and caches icons (including SVG rasterization via `resvg`) in `~/.local/share/kyvyrn/icons/`.
+- **Package Manager Independence**:
+  - Web apps run independently of the Kyvyrn manager. If Kyvyrn is uninstalled (e.g. via `paru -Rns kyvyrn`), all generated apps and desktop shortcuts remain 100% functional.
+- **Runtime Window Customization**:
+  - Instant toggle for native window titlebars/decorations (`Show` / `Hide`) — perfect for tiling window managers like Hyprland, Sway, and i3.
+  - Topbar drag region support (`data-tauri-drag-region`).
+- **Smart Chromium Discovery**: Automatically detects Brave, Chrome, Chromium, Vivaldi, Opera, and Edge.
+- **Lightweight by Design**: Zero Electron bloat. Clean JetBrains Mono terminal-inspired design tokens.
 
 ---
 
 ## Tech Stack
 
 - **Frontend**: React 19, TypeScript, Vite
-- **Styling**: Tailwind CSS v4
-- **Build Tool**: Vite
-- **Desktop Backend**: Tauri (Rust)
-- **Linting**: ESLint with TypeScript support
+- **Styling**: Vanilla CSS tokens with Tailwind CSS layout utilities
+- **Desktop Backend**: Tauri v2 (Rust)
+- **SVG & Image Codecs**: `resvg`, `tiny-skia`, `image`
+- **Typography**: JetBrains Mono
 
 ---
 
@@ -33,84 +38,65 @@ Built with **React, TypeScript, Vite, and Tauri**, Kyvyrn focuses on performance
 
 ```
 kyvyrn/
-├── eslint.config.js
 ├── index.html
-├── LICENSE
 ├── package.json
-├── postcss.config.cjs
-├── README.md
-├── tailwind.config.js
-├── tsconfig.app.json
-├── tsconfig.json
-├── tsconfig.node.json
 ├── vite.config.ts
-├── public/                       # Static assets
 ├── src/
-│   ├── App.tsx                   # App state & routing
-│   ├── index.css                 # Global styles (Tailwind)
-│   ├── main.tsx                  # React entry point
-│   ├── assets/
-│   ├── components/
-│   │   └── UrlInput.tsx          # Reusable URL input component
+│   ├── App.tsx                       # Root component
+│   ├── index.css                     # Design tokens & core styles
+│   ├── main.tsx                      # React entry point
+│   ├── ui/                           # Structural UI primitives
+│   │   ├── Topbar.tsx                # App header & draggable region
+│   │   ├── Tile.tsx                  # Library app tiles
+│   │   ├── WorkspaceTabs.tsx         # Tab navigation rail
+│   │   ├── ConfigDrawer.tsx          # Per-app configuration pane
+│   │   └── OnboardingTrack.tsx       # App creation wizard
+│   ├── subsys/                       # Subsystems
+│   │   ├── engine/                   # Engine detection & picker
+│   │   ├── library/                  # App CRUD & state hooks (useApps)
+│   │   ├── config/                   # Global preferences (useGlobalConfig)
+│   │   └── icon/                     # Icon upload & refresh hooks
 │   ├── pages/
-│   │   ├── Landing.tsx           # Welcome page for first-time users
-│   │   └── Wrapper.tsx           # Main app interface
-│   ├── types/
-│   │   ├── engine.ts
-│   │   └── globalConfig.ts
-│   └── utils/
-│       └── icon.tsx
-└── src-tauri/                    # Tauri backend (Rust)
-    ├── build.rs
-    ├── Cargo.toml
-    ├── tauri.conf.json
-    ├── capabilities/
-    │   └── default.json
-    ├── gen/
-    │   └── schemas/
-    │       ├── acl-manifests.json
-    │       ├── capabilities.json
-    │       ├── desktop-schema.json
-    │       └── linux-schema.json
-    ├── icons/                    # Platform icons
-    ├── src/
-    │   ├── lib.rs
-    │   ├── main.rs
-    │   ├── commands/
-    │   │   ├── chromium.rs
-    │   │   ├── configs.rs
-    │   │   ├── global_config.rs
-    │   │   ├── icons.rs
-    │   │   ├── mod.rs
-    │   │   └── webview.rs
-    │   ├── net/
-    │   │   ├── http.rs
-    │   │   └── mod.rs
-    │   └── utils/
-    │       ├── browser.rs
-    │       ├── mod.rs
-    │       ├── paths.rs
-    │       └── url.rs
-    └── target/                   # Build artifacts
+│   │   └── Wrapper.tsx               # Main application view & settings
+│   └── types/                        # Shared TypeScript interfaces
+└── src-tauri/                        # Tauri v2 Backend (Rust)
+    ├── Cargo.toml                    # Package manifest & [[bin]] targets
+    ├── tauri.conf.json               # Tauri v2 configuration
+    └── src/
+        ├── main.rs                   # Kyvyrn manager entry point & IPC router
+        ├── bin/
+        │   └── runner.rs             # Autonomous standalone WebKit micro-runner
+        ├── commands/                 # IPC handlers
+        │   ├── configs.rs            # App CRUD & desktop entry lifecycle
+        │   ├── global_config.rs      # Global preferences & live titlebar toggle
+        │   ├── icons.rs              # Icon fetch, SVG rasterize & caching
+        │   ├── chromium.rs           # Chromium process spawning
+        │   └── webview.rs            # WebKit process spawning
+        ├── net/
+        │   └── http.rs               # HTTP client for favicons & assets
+        └── utils/
+            ├── browser.rs            # Chromium browser detection
+            ├── desktop.rs            # .desktop entry generation & runner deployment
+            ├── paths.rs              # XDG directory & path resolution
+            └── url.rs                # URL normalization
 ```
-
 
 ---
 
-## How Kyvyrn Works
+## How It Works
 
-1. Enter a website URL
-2. Kyvyrn selects the best available browser engine
-3. The site launches in **app mode**
-4. App configuration is persisted locally
+### 1. Storage & XDG Locations
 
-Each wrapped app is stored in:
+All user applications and configs follow standard XDG directories:
 
-```bash
-~/.local/share/kyvyrn/<app-name>/
-````
-
-Global preferences are stored separately and only apply to **newly created apps**.
+- **App Data**: `~/.local/share/kyvyrn/Apps/{name}-{id}/`
+  - `config.json` — App metadata, URL, and engine configuration
+  - `runner` — Standalone autonomous WebKit runner binary
+  - `webkit_data/` — Isolated cookies, storage, and cache for WebKit apps
+  - `profile/` — Isolated browser profile directory for Chromium apps
+- **Cached Icons**: `~/.local/share/kyvyrn/icons/{id}.png`
+- **Desktop Entries**: `~/.local/share/applications/kyvyrn-{id}.desktop`
+- **Global Settings**: `~/.config/kyvyrn/config.json`
 
 ---
 
@@ -118,159 +104,65 @@ Global preferences are stored separately and only apply to **newly created apps*
 
 ### Prerequisites
 
-* **Node.js** (v18 or higher)
-* **npm** or **yarn**
-* **Rust** (latest stable)
-* **Tauri CLI**
-
+- **Node.js** (v18+) & **npm**
+- **Rust** (latest stable) & **Cargo**
+- **Tauri v2 CLI**:
   ```bash
-  cargo install tauri-cli
----
+  cargo install tauri-cli --version "^2.0"
+  ```
 
-### System Dependencies
+### System Dependencies (Linux)
 
-#### Linux (Ubuntu / Debian)
+#### Arch Linux
+```bash
+sudo pacman -S webkit2gtk-4.1 gtk3 base-devel
+```
 
+#### Ubuntu / Debian
 ```bash
 sudo apt update
-sudo apt install \
-  libwebkit2gtk-4.1-dev \
-  libgtk-3-dev \
-  libayatana-appindicator3-dev \
-  librsvg2-dev \
-  patchelf
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 ```
-
-#### macOS
-
-```bash
-xcode-select --install
-brew install gtk+3 librsvg
-```
-
-#### Windows
-
-* Install **Microsoft Visual Studio C++ Build Tools**
-* Install **WebView2 Runtime** (usually preinstalled on Windows 10+)
 
 ---
 
-## Installation
+### Arch Linux (Native Installation)
 
-1. Clone the repository:
+To build and install Kyvyrn with `pacman`:
 
-   ```bash
-   git clone <repository-url>
-   cd kyvyrn
-   ```
+```bash
+# Build and install locally
+makepkg -si
 
-2. Install frontend dependencies:
-
-   ```bash
-   npm install
-   ```
-
-3. Verify Tauri setup:
-
-   ```bash
-   cargo tauri --version
-   ```
+# To uninstall cleanly
+sudo pacman -Rns kyvyrn
+# or
+paru -Rns kyvyrn
+```
 
 ---
 
-## Development
+## Development & Building
 
-### Frontend Only
-
-```bash
-npm run dev
-```
-
-Runs the app in the browser at `http://localhost:5173`
-
-### Desktop App (Tauri)
+### Running in Development
 
 ```bash
 cargo tauri dev
 ```
 
-Launches the native desktop app with hot reload.
-
----
-
-## Building for Production
-
-### Web Build
-
-```bash
-npm run build
-npm run preview
-```
-
-### Desktop Build
+### Building for Production
 
 ```bash
 cargo tauri build
 ```
 
-Distributable binaries are generated in:
-
-```bash
-src-tauri/target/release/bundle/
-```
-
----
-
-## Usage
-
-### Desktop App
-
-* Add new apps by entering a URL
-* Manage all wrapped apps from the main interface
-* Launch apps in native windows
-* Persist per-app and global settings locally
-
-### Configuration
-
-* **Per-app configs** live inside the Kyvyrn data directory
-* **Global defaults** affect only newly created apps
-* No hidden state or opaque storage
+Binary outputs:
+- **Manager GUI**: `src-tauri/target/release/kyvyrn`
+- **Micro-Runner**: `src-tauri/target/release/kyvyrn-runner`
+- **Packages**: `src-tauri/target/release/bundle/` (`.deb`, `.rpm`, or `.tar.gz`)
 
 ---
 
-## Tauri Backend
+## License
 
-The Rust backend handles:
-
-* Window creation and lifecycle
-* App-mode launching
-* File system persistence
-* OS-level integration
-
-Key files:
-
-* `main.rs` — Tauri command definitions
-* `tauri.conf.json` — App metadata and permissions
-* `icons/` — Platform-specific icons
-
----
-
-## Philosophy
-
-Kyvyrn is built for people who want:
-
-* Native performance
-* Minimal overhead
-* Predictable behavior
-* Respect for the host OS
-
-No background junk.
-No bloated runtimes.
-Just your app — running clean.
-
----
-
-## Status
-
-Kyvyrn is under active development.
-Breaking changes may occur until the first stable release.
+MIT

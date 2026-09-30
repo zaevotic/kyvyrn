@@ -107,11 +107,17 @@ fn try_favicon_from_html(base: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn icon_path(app_id: &str) -> Result<PathBuf, String> {
-    let mut path = dirs::data_dir().ok_or("No data dir")?;
-    path.push("kyvyrn/icons");
-    path.push(format!("{app_id}.png"));
-    Ok(path)
+fn icon_path(app_id: &str) -> PathBuf {
+    crate::utils::paths::icon_path(app_id)
+}
+
+fn sync_app_desktop_entry(app_id: &str) {
+    if let Ok(app_dir) = crate::utils::paths::app_dir_by_id(app_id) {
+        let config_path = app_dir.join("config.json");
+        if let Ok(config) = crate::commands::configs::load_config(&config_path) {
+            let _ = crate::utils::desktop::write_desktop_entry(&config);
+        }
+    }
 }
 
 fn try_favicon_ico(base: &str) -> Result<Vec<u8>, String> {
@@ -158,13 +164,13 @@ fn render_svg_to_png(svg_bytes: &[u8]) -> Result<Vec<u8>, String> {
 
 #[tauri::command]
 pub fn get_icon_bytes(app_id: String) -> Result<Vec<u8>, String> {
-    let path = icon_path(&app_id)?;
+    let path = icon_path(&app_id);
     std::fs::read(path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_app_icon_path(app_id: String) -> Option<String> {
-    let path = icon_path(&app_id).ok()?;
+    let path = icon_path(&app_id);
 
     if path.exists() {
         Some(path.to_string_lossy().to_string())
@@ -175,7 +181,7 @@ pub fn get_app_icon_path(app_id: String) -> Option<String> {
 
 #[tauri::command]
 pub fn refresh_site_icon(app_id: String, url: String) -> Result<(), String> {
-    let path = icon_path(&app_id)?;
+    let path = icon_path(&app_id);
 
     let base = normalize_base_url(&url);
     let png = try_favicon_ico(&base).or_else(|_| try_favicon_from_html(&base))?;
@@ -185,12 +191,13 @@ pub fn refresh_site_icon(app_id: String, url: String) -> Result<(), String> {
     }
 
     std::fs::write(&path, &png).map_err(|e| e.to_string())?;
+    sync_app_desktop_entry(&app_id);
     Ok(())
 }
 
 #[tauri::command]
 pub fn fetch_site_icon(app_id: String, url: String) -> Result<(), String> {
-    let path = icon_path(&app_id)?;
+    let path = icon_path(&app_id);
 
     if path.exists() {
         return Ok(());
@@ -204,12 +211,13 @@ pub fn fetch_site_icon(app_id: String, url: String) -> Result<(), String> {
     }
 
     std::fs::write(&path, &png).map_err(|e| e.to_string())?;
+    sync_app_desktop_entry(&app_id);
     Ok(())
 }
 
 #[tauri::command]
 pub fn save_app_icon(app_id: String, icon_bytes: Vec<u8>) -> Result<(), String> {
-    let path = icon_path(&app_id)?;
+    let path = icon_path(&app_id);
 
     let img = image::load_from_memory(&icon_bytes).map_err(|_| "Invalid image")?;
 
@@ -218,8 +226,11 @@ pub fn save_app_icon(app_id: String, icon_bytes: Vec<u8>) -> Result<(), String> 
         .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
 
-    std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
 
     std::fs::write(&path, out).map_err(|e| e.to_string())?;
+    sync_app_desktop_entry(&app_id);
     Ok(())
 }
