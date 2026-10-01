@@ -33,14 +33,11 @@ pub struct AppConfig {
     pub titlebar: Option<bool>,
 }
 
-#[tauri::command]
-pub fn load_apps(state: tauri::State<AppRegistry>) -> Result<Vec<AppConfig>, String> {
+pub fn list_all_configs() -> Result<Vec<AppConfig>, String> {
     let base = crate::utils::paths::apps_dir();
     fs::create_dir_all(&base).map_err(|e| e.to_string())?;
 
-    let mut registry = state.apps.lock().unwrap();
-    registry.clear();
-
+    let mut apps = Vec::new();
     for entry in fs::read_dir(base).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path().join("config.json");
@@ -48,14 +45,24 @@ pub fn load_apps(state: tauri::State<AppRegistry>) -> Result<Vec<AppConfig>, Str
         if path.exists() {
             let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
             if let Ok(app) = serde_json::from_str::<AppConfig>(&data) {
-                // Ensure desktop entry exists and is synced
                 let _ = crate::utils::desktop::write_desktop_entry(&app);
-                registry.insert(app.id.clone(), app);
+                apps.push(app);
             }
         }
     }
+    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(apps)
+}
 
-    Ok(registry.values().cloned().collect())
+#[tauri::command]
+pub fn load_apps(state: tauri::State<AppRegistry>) -> Result<Vec<AppConfig>, String> {
+    let apps = list_all_configs()?;
+    let mut registry = state.apps.lock().unwrap();
+    registry.clear();
+    for app in &apps {
+        registry.insert(app.id.clone(), app.clone());
+    }
+    Ok(apps)
 }
 
 #[tauri::command]

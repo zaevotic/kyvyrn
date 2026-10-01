@@ -19,8 +19,55 @@ Built with **Tauri v2 (Rust), React 19, TypeScript, and Vite**, Kyvyrn manages b
 - **Runtime Window Customization**:
   - Instant toggle for native window titlebars/decorations (`Show` / `Hide`) — perfect for tiling window managers like Hyprland, Sway, and i3.
   - Topbar drag region support (`data-tauri-drag-region`).
+- **CLI & Package Manager Interface**:
+  - Full terminal command-line interface (`kyvyrn install`, `kyvyrn list`, `kyvyrn rm`, `kyvyrn launch`, `kyvyrn info`, `kyvyrn config`).
+  - Manage web applications seamlessly from the terminal or the React GUI with zero IPC overhead.
 - **Smart Chromium Discovery**: Automatically detects Brave, Chrome, Chromium, Vivaldi, Opera, and Edge.
 - **Lightweight by Design**: Zero Electron bloat. Clean JetBrains Mono terminal-inspired design tokens.
+
+---
+
+## CLI Usage (Package Manager)
+
+Kyvyrn functions as both a standalone desktop GUI and a command-line web app package manager:
+
+```bash
+# Launch the GUI Manager
+kyvyrn
+
+# Install / Add a web application
+kyvyrn install https://chatgpt.com --name "ChatGPT"
+kyvyrn -i https://web.whatsapp.com -n "WhatsApp" -e chromium -b brave
+
+# List all installed web applications
+kyvyrn list
+kyvyrn -l
+
+# Launch an application by name or ID
+kyvyrn launch chatgpt
+
+# View detailed application metadata and paths
+kyvyrn info instagram
+
+# Remove / Uninstall an application
+kyvyrn rm chatgpt
+kyvyrn -r 1790806955888
+
+# View and update global preferences
+kyvyrn config
+kyvyrn config titlebar hide
+```
+
+### Command Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `-n, --name <NAME>` | Set custom application display name (default: derived from URL) |
+| `-e, --engine <ENGINE>` | Engine type: `webkit` (default) or `chromium` |
+| `-b, --browser <BROWSER>` | Target Chromium binary (e.g. `brave`, `google-chrome`, `chromium`) |
+| `-i, --icon <PATH>` | Local image path to use as icon |
+| `--titlebar <show\|hide>` | Explicitly show or hide the window titlebar / decorations |
+| `--no-titlebar` | Shorthand for `--titlebar hide` |
 
 ---
 

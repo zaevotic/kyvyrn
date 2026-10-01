@@ -5,9 +5,15 @@ use std::sync::Mutex;
 mod commands;
 mod utils;
 mod net;
+mod cli;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    // 0. Handle CLI package manager commands (install, list, rm, launch, info, config, etc.)
+    if let Some(exit_code) = cli::handle_cli(&args) {
+        std::process::exit(exit_code);
+    }
 
     // 1. Check if launched in standalone app mode by ID
     if let Some(pos) = args.iter().position(|a| a == "--launch-app") {
@@ -134,7 +140,7 @@ fn launch_standalone_app_by_id(app_id: &str) {
     }
 }
 
-fn run_webkit_window(config: AppConfig, app_dir: std::path::PathBuf) {
+pub(crate) fn run_webkit_window(config: AppConfig, app_dir: std::path::PathBuf) {
     let app_id = config.id.clone();
     let app_name = config.name.clone();
     let raw_url = config.url.clone();

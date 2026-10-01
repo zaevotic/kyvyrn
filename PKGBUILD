@@ -28,8 +28,13 @@ package() {
     install -Dm755 src-tauri/target/release/kyvyrn "$pkgdir/usr/bin/kyvyrn"
     install -Dm755 src-tauri/target/release/kyvyrn-runner "$pkgdir/usr/lib/kyvyrn/kyvyrn-runner"
 
-    # Install desktop icon
-    install -Dm644 src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/kyvyrn.png"
+    # Install desktop icons (all standard resolutions)
+    for size in 16 24 32 48 64 96 128 256 512; do
+        if [ -f "src-tauri/icons/${size}x${size}.png" ]; then
+            install -Dm644 "src-tauri/icons/${size}x${size}.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/kyvyrn.png"
+        fi
+    done
+    install -Dm644 src-tauri/icons/512x512.png "$pkgdir/usr/share/pixmaps/kyvyrn.png"
 
     # Install desktop launcher
     install -d "$pkgdir/usr/share/applications"
@@ -43,6 +48,6 @@ Exec=kyvyrn
 Icon=kyvyrn
 Terminal=false
 StartupWMClass=Kyvyrn
-Categories=Utility;Network;
+Categories=Utility;DesktopUtility;System;
 EOF
 }
