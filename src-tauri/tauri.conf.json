@@ -20,14 +20,32 @@
 
   "bundle": {
     "active": true,
-    "targets": ["rpm", "deb"],
-
+    "targets": ["deb", "rpm"],
+    "category": "Utility",
+    "shortDescription": "Lightweight Linux web app manager",
+    "longDescription": "Kyvyrn is a lightweight, Linux-first desktop app manager that turns web apps into clean, native-feeling applications.",
     "icon": [
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"],
+        "files": {
+          "/usr/lib/kyvyrn/kyvyrn-runner": "target/release/kyvyrn-runner"
+        }
+      },
+      "rpm": {
+        "depends": ["webkit2gtk4.1", "gtk3"],
+        "files": {
+          "/usr/lib/kyvyrn/kyvyrn-runner": "target/release/kyvyrn-runner"
+        }
+      }
+    }
   }
 }

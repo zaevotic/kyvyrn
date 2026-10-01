@@ -168,23 +168,61 @@ sudo pacman -S webkit2gtk-4.1 gtk3 base-devel
 #### Ubuntu / Debian
 ```bash
 sudo apt update
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev build-essential
+```
+
+#### Fedora / RHEL
+```bash
+sudo dnf install webkit2gtk4.1-devel gtk3-devel librsvg2-devel
 ```
 
 ---
 
-### Arch Linux (Native Installation)
+## Native Installation by Distro
 
-To build and install Kyvyrn with `pacman`:
+Kyvyrn provides a single-command build and install workflow across all major package managers:
 
+### 1. Arch Linux (`pacman`)
 ```bash
-# Build and install locally
+# Using Makefile
+make arch
+
+# Or directly with makepkg
 makepkg -si
 
-# To uninstall cleanly
+# To uninstall
 sudo pacman -Rns kyvyrn
-# or
-paru -Rns kyvyrn
+# or: paru -Rns kyvyrn
+```
+
+### 2. Debian / Ubuntu (`apt` / `.deb`)
+```bash
+# Using Makefile (builds runner, packages .deb, and installs via apt)
+make deb
+
+# Or manually with cargo tauri
+npm install
+cargo build --release --manifest-path src-tauri/Cargo.toml --bin kyvyrn-runner
+cargo tauri build --bundles deb
+sudo apt install ./src-tauri/target/release/bundle/deb/kyvyrn_*.deb
+
+# To uninstall
+sudo apt remove kyvyrn
+```
+
+### 3. Fedora / RHEL / openSUSE (`dnf` / `.rpm`)
+```bash
+# Using Makefile (builds runner, packages .rpm, and installs via dnf)
+make rpm
+
+# Or manually with cargo tauri
+npm install
+cargo build --release --manifest-path src-tauri/Cargo.toml --bin kyvyrn-runner
+cargo tauri build --bundles rpm
+sudo dnf install ./src-tauri/target/release/bundle/rpm/kyvyrn-*.rpm
+
+# To uninstall
+sudo dnf remove kyvyrn
 ```
 
 ---
